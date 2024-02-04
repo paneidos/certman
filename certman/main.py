@@ -194,21 +194,24 @@ def sign(
     ] = None,
 ):
     console = Console()
-
     p12file = P12File(file)
-    if p12file.exists():
-        password = get_password(console, p12file)
-        if p12file.certificate is not None:
-            answer = console.input(
-                "File already contains a certificate, overwrite? (y/N) "
-            )
-            if answer == "" or answer[0].lower() != "y":
-                raise typer.Abort()
+    if not p12file.exists():
+        raise typer.Abort("File not found")
+
+    password = get_password(console, p12file)
+    if p12file.certificate is not None:
+        answer = console.input("File already contains a certificate, overwrite? (y/N) ")
+        if answer == "" or answer[0].lower() != "y":
+            raise typer.Abort()
 
     issuer_name = None
     issuer_key = p12file.key
-    if sign_with is None:
-        pass
+    if sign_with is not None:
+        sign_p12 = P12File(sign_with)
+        get_password(console, sign_p12)
+        issuer_key = sign_p12.key
+        issuer_name = sign_p12.certificate.certificate.subject
+        p12file.chain = [sign_p12.certificate]
 
     if attributes is None or len(attributes) == 0:
         sign_attributes = ask_attributes(console)
@@ -252,10 +255,15 @@ def export_certificate(
 
     if p12file.certificate is not None:
         data = p12file.certificate.certificate.public_bytes(Encoding.PEM)
+        chain_data = [
+            cert.certificate.public_bytes(Encoding.PEM)
+            for cert in (p12file.chain or [])
+        ]
+        all_data = b"".join([data, *chain_data])
         if output is None:
-            console.print(data.decode(), end="")
+            console.print(all_data.decode(), end="")
         else:
-            output.write_bytes(data)
+            output.write_bytes(all_data)
 
 
 @export_app.command("key")
