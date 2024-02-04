@@ -2,7 +2,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, NamedTuple
 
+from cryptography.hazmat.primitives._serialization import PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509 import (
     CertificateBuilder,
     NameAttribute,
@@ -19,6 +21,15 @@ from certman.enums import KeyType
 from certman.p12 import P12File
 
 app = typer.Typer()
+export_app = typer.Typer()
+app.add_typer(export_app, name="export")
+
+
+def get_password(console: Console, p12file: P12File) -> str:
+    password = ""
+    while not p12file.read(password.encode()):
+        password = console.input(f"Password for {p12file.name}: ", password=True)
+    return password
 
 
 @app.command()
@@ -34,8 +45,7 @@ def create(
     password = None
     if p12file.exists():
         password = ""
-        while not p12file.read(password.encode()):
-            password = console.input(f"Password for {file.name}: ", password=True)
+        password = get_password(console, p12file)
         if p12file.key is not None:
             answer = console.input(
                 "File already contains a private key, overwrite? (y/N) "
@@ -71,9 +81,7 @@ def info(file: Annotated[Path, typer.Argument(help="The p12 file to read")]):
 
     p12file = P12File(file)
     if p12file.exists():
-        password = ""
-        while not p12file.read(password.encode()):
-            password = console.input(f"Password for {file.name}: ", password=True)
+        password = get_password(console, p12file)
 
     if p12file.key is not None:
         match p12file.key:
@@ -188,10 +196,8 @@ def sign(
     console = Console()
 
     p12file = P12File(file)
-    password = ""
     if p12file.exists():
-        while not p12file.read(password.encode()):
-            password = console.input(f"Password for {file.name}: ", password=True)
+        password = get_password(console, p12file)
         if p12file.certificate is not None:
             answer = console.input(
                 "File already contains a certificate, overwrite? (y/N) "
@@ -230,3 +236,47 @@ def sign(
     )
     p12file.certificate = cert
     p12file.write(password.encode())
+
+
+@export_app.command("certificate")
+def export_certificate(
+    file: Annotated[Path, typer.Argument(help="The p12 file to read/write")],
+    output: Annotated[
+        Optional[Path], typer.Option(help="Where to write the certificate")
+    ] = None,
+):
+    console = Console()
+
+    p12file = P12File(file)
+    password = get_password(console, p12file)
+
+    if p12file.certificate is not None:
+        data = p12file.certificate.certificate.public_bytes(Encoding.PEM)
+        if output is None:
+            console.print(data.decode(), end="")
+        else:
+            output.write_bytes(data)
+
+
+@export_app.command("key")
+def export_key(
+    file: Annotated[Path, typer.Argument(help="The p12 file to read/write")],
+    output: Annotated[
+        Optional[Path], typer.Option(help="Where to write the key")
+    ] = None,
+):
+    console = Console()
+
+    p12file = P12File(file)
+    password = get_password(console, p12file)
+
+    if p12file.key is not None:
+        data = p12file.key.private_bytes(
+            encoding=Encoding.PEM,
+            format=PrivateFormat.PKCS8,
+            encryption_algorithm=NoEncryption(),
+        )
+        if output is None:
+            console.print(data.decode(), end="")
+        else:
+            output.write_bytes(data)

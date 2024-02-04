@@ -1,19 +1,29 @@
 from pathlib import Path
 
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from cryptography.hazmat.primitives.serialization import (
     pkcs12,
     BestAvailableEncryption,
     NoEncryption,
 )
+from cryptography.hazmat.primitives.serialization.pkcs12 import PKCS12Certificate
 
 
 class P12File:
+    key: RSAPrivateKey | EllipticCurvePrivateKey | None
+    certificate: PKCS12Certificate | None
+
     def __init__(self, path: Path):
         self.path = path
         self.key = None
         self.certificate = None
         self.chain = None
         self._loaded = False
+
+    @property
+    def name(self):
+        return self.path.name
 
     def exists(self) -> bool:
         return self.path.exists()
