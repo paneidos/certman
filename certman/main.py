@@ -1,5 +1,15 @@
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, NamedTuple
 
+from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.x509 import (
+    CertificateBuilder,
+    NameAttribute,
+    Name,
+    random_serial_number,
+)
+from cryptography.x509.oid import NameOID, ObjectIdentifier
 from rich.console import Console
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import typer
@@ -79,3 +89,144 @@ def info(file: Annotated[Path, typer.Argument(help="The p12 file to read")]):
                 key_type = "Unknown"
                 key_data = ""
         console.print(f"Private key: {key_type}{key_data}")
+
+
+class CertificateAttribute(NamedTuple):
+    key: str
+    label: str
+    oid: ObjectIdentifier
+    example: str
+    multiple: bool
+    ask: bool
+
+
+CERTIFICATE_ATTRIBUTES = [
+    CertificateAttribute("country", "Country", NameOID.COUNTRY_NAME, "NL", False, True),
+    CertificateAttribute(
+        "state", "State/Province", NameOID.STATE_OR_PROVINCE_NAME, "NL", False, True
+    ),
+    CertificateAttribute(
+        "city", "City/Locality", NameOID.LOCALITY_NAME, "NL", False, True
+    ),
+    CertificateAttribute(
+        "org",
+        "Organization",
+        NameOID.ORGANIZATION_NAME,
+        "Example B.V.",
+        False,
+        True,
+    ),
+    CertificateAttribute(
+        "ou", "OU", NameOID.ORGANIZATIONAL_UNIT_NAME, "IT", False, True
+    ),
+    CertificateAttribute(
+        "cn", "Common Name", NameOID.COMMON_NAME, "Domain name", False, True
+    ),
+    CertificateAttribute(
+        "email", "Email Address", NameOID.COMMON_NAME, "you@example.com", False, True
+    ),
+    CertificateAttribute(
+        "unstructured", "Unstructured Name", NameOID.UNSTRUCTURED_NAME, "", False, False
+    ),
+]
+
+
+def convert_attributes(attributes: list[str]) -> dict[CertificateAttribute, list[str]]:
+    results = {}
+    all_attributes = {attribute.key: attribute for attribute in CERTIFICATE_ATTRIBUTES}
+    for attribute in attributes:
+        key, value = attribute.split(":")
+        if key not in all_attributes:
+            raise typer.Abort(f"Unknown attribute: {key}")
+        attr = all_attributes[key]
+        if attr.multiple:
+            current = results.get(attr, [])
+            current.append(value)
+            results[attr] = current
+        else:
+            results[attr] = value
+    return results
+
+
+def ask_attributes(console: Console) -> dict[CertificateAttribute, list[str]]:
+    results = {}
+    for attribute in CERTIFICATE_ATTRIBUTES:
+        if not attribute.ask:
+            continue
+
+        if attribute.multiple:
+            result_list = []
+            while result := console.input(
+                f"{attribute.label} (e.g. {attribute.example}): "
+            ):
+                result_list.append(result)
+            if len(result_list) > 0:
+                results[attribute] = result_list
+        else:
+            result = console.input(f"{attribute.label} (e.g. {attribute.example}): ")
+            if result:
+                results[attribute] = result
+    return results
+
+
+@app.command()
+def sign(
+    file: Annotated[Path, typer.Argument(help="The p12 file to read/write")],
+    sign_with: Annotated[
+        Optional[Path],
+        typer.Argument(
+            help="The p12 file to use as signing certificate, omit to self-sign",
+        ),
+    ] = None,
+    attributes: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            metavar="attribute:value", help="Specify values for the certificate"
+        ),
+    ] = None,
+):
+    console = Console()
+
+    p12file = P12File(file)
+    password = ""
+    if p12file.exists():
+        while not p12file.read(password.encode()):
+            password = console.input(f"Password for {file.name}: ", password=True)
+        if p12file.certificate is not None:
+            answer = console.input(
+                "File already contains a certificate, overwrite? (y/N) "
+            )
+            if answer == "" or answer[0].lower() != "y":
+                raise typer.Abort()
+
+    issuer_name = None
+    issuer_key = p12file.key
+    if sign_with is None:
+        pass
+
+    if attributes is None or len(attributes) == 0:
+        sign_attributes = ask_attributes(console)
+    else:
+        sign_attributes = convert_attributes(attributes)
+
+    name_attributes = [
+        NameAttribute(attr.oid, value)
+        for attr, value in sign_attributes.items()
+        if isinstance(value, str)
+    ]
+    subject_name = Name(name_attributes)
+    if issuer_name is None:
+        issuer_name = subject_name
+
+    cert = (
+        CertificateBuilder()
+        .subject_name(subject_name)
+        .issuer_name(issuer_name)
+        .public_key(p12file.key.public_key())
+        .serial_number(random_serial_number())
+        .not_valid_before(datetime.utcnow())
+        .not_valid_after(datetime.utcnow() + timedelta(days=365))
+        .sign(issuer_key, SHA256())
+    )
+    p12file.certificate = cert
+    p12file.write(password.encode())
