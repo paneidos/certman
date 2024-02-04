@@ -1,0 +1,10 @@
+# Python cache/artifacts
+__pycache__
+*.pyo
+*.pyc
+
+# Generated files
+*.p12
+*.key
+*.pem
+*.crt
