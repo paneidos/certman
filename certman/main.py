@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, NamedTuple
 
+from cryptography.hazmat._oid import ExtendedKeyUsageOID
 from cryptography.hazmat.primitives._serialization import PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.serialization import Encoding
@@ -10,6 +11,16 @@ from cryptography.x509 import (
     NameAttribute,
     Name,
     random_serial_number,
+    BasicConstraints,
+    ExtendedKeyUsage,
+    KeyUsage,
+    SubjectKeyIdentifier,
+    AuthorityKeyIdentifier,
+    SubjectAlternativeName,
+    DNSName,
+    CRLDistributionPoints,
+    DistributionPoint,
+    UniformResourceIdentifier,
 )
 from cryptography.x509.oid import NameOID, ObjectIdentifier
 from rich.console import Console
@@ -111,10 +122,15 @@ class CertificateAttribute(NamedTuple):
 CERTIFICATE_ATTRIBUTES = [
     CertificateAttribute("country", "Country", NameOID.COUNTRY_NAME, "NL", False, True),
     CertificateAttribute(
-        "state", "State/Province", NameOID.STATE_OR_PROVINCE_NAME, "NL", False, True
+        "state",
+        "State/Province",
+        NameOID.STATE_OR_PROVINCE_NAME,
+        "Noord-Holland",
+        False,
+        True,
     ),
     CertificateAttribute(
-        "city", "City/Locality", NameOID.LOCALITY_NAME, "NL", False, True
+        "city", "City/Locality", NameOID.LOCALITY_NAME, "Amsterdam", False, True
     ),
     CertificateAttribute(
         "org",
@@ -131,7 +147,7 @@ CERTIFICATE_ATTRIBUTES = [
         "cn", "Common Name", NameOID.COMMON_NAME, "Domain name", False, True
     ),
     CertificateAttribute(
-        "email", "Email Address", NameOID.COMMON_NAME, "you@example.com", False, True
+        "email", "Email Address", NameOID.EMAIL_ADDRESS, "you@example.com", False, True
     ),
     CertificateAttribute(
         "unstructured", "Unstructured Name", NameOID.UNSTRUCTURED_NAME, "", False, False
@@ -186,10 +202,25 @@ def sign(
             help="The p12 file to use as signing certificate, omit to self-sign",
         ),
     ] = None,
+    expires: Annotated[
+        Optional[int],
+        typer.Option(metavar="days", help="Number of days before certificate expires"),
+    ] = 365,
     attributes: Annotated[
         Optional[list[str]],
         typer.Option(
             metavar="attribute:value", help="Specify values for the certificate"
+        ),
+    ] = None,
+    ca: Annotated[Optional[bool], typer.Option(help="Use as CA")] = False,
+    crl: Annotated[
+        Optional[list[str]],
+        typer.Option(metavar="url", help="URL where CRL can be found"),
+    ] = None,
+    dns: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            metavar="domain", help="Specify the DNS names for the certificate"
         ),
     ] = None,
 ):
@@ -227,16 +258,72 @@ def sign(
     if issuer_name is None:
         issuer_name = subject_name
 
-    cert = (
+    cert_builder = (
         CertificateBuilder()
         .subject_name(subject_name)
         .issuer_name(issuer_name)
         .public_key(p12file.key.public_key())
         .serial_number(random_serial_number())
         .not_valid_before(datetime.utcnow())
-        .not_valid_after(datetime.utcnow() + timedelta(days=365))
-        .sign(issuer_key, SHA256())
+        .not_valid_after(datetime.utcnow() + timedelta(days=expires))
     )
+    extensions = [
+        ExtendedKeyUsage(
+            [ExtendedKeyUsageOID.CLIENT_AUTH, ExtendedKeyUsageOID.SERVER_AUTH]
+        ),
+        SubjectKeyIdentifier.from_public_key(p12file.key.public_key()),
+        AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+    ]
+    critical_extensions = []
+    alternate_names = []
+    if dns is not None and len(dns) > 0:
+        alternate_names += [DNSName(domain) for domain in dns]
+    if len(alternate_names):
+        extensions.append(SubjectAlternativeName(alternate_names))
+    if ca:
+        critical_extensions += [
+            BasicConstraints(ca=True, path_length=None),
+            KeyUsage(
+                digital_signature=True,
+                key_cert_sign=True,
+                crl_sign=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+        ]
+        if crl is not None and len(crl) > 0:
+            extensions.append(
+                CRLDistributionPoints(
+                    [
+                        DistributionPoint(full_name=UniformResourceIdentifier(url))
+                        for url in crl
+                    ]
+                )
+            )
+    else:
+        critical_extensions += [
+            BasicConstraints(ca=False, path_length=None),
+            KeyUsage(
+                digital_signature=True,
+                key_encipherment=True,
+                key_cert_sign=False,
+                crl_sign=False,
+                content_commitment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+        ]
+    for critical_extension in critical_extensions:
+        cert_builder = cert_builder.add_extension(critical_extension, critical=True)
+    for extension in extensions:
+        cert_builder = cert_builder.add_extension(extension, critical=False)
+    cert = cert_builder.sign(issuer_key, SHA256())
     p12file.certificate = cert
     p12file.write(password.encode())
 
