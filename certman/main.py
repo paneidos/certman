@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, NamedTuple
 
+import jks
 from cryptography.hazmat._oid import ExtendedKeyUsageOID
 from cryptography.hazmat.primitives._serialization import PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.hashes import SHA256
@@ -348,7 +349,7 @@ def export_certificate(
         ]
         all_data = b"".join([data, *chain_data])
         if output is None:
-            console.print(all_data.decode(), end="")
+            console.print(all_data.decode(), end="", highlight=False)
         else:
             output.write_bytes(all_data)
 
@@ -372,6 +373,28 @@ def export_key(
             encryption_algorithm=NoEncryption(),
         )
         if output is None:
-            console.print(data.decode(), end="")
+            console.print(data.decode(), end="", highlight=False)
         else:
             output.write_bytes(data)
+
+
+@export_app.command("jks")
+def export_jks(
+    file: Annotated[Path, typer.Argument(help="The p12 file to read/write")],
+    output: Annotated[Path, typer.Argument(help="Where to write the JKS file")],
+    alias: Annotated[str, typer.Argument(help="The alias to give the certificate")],
+):
+    console = Console()
+
+    p12file = P12File(file)
+    password = get_password(console, p12file)
+
+    key = p12file.key
+    certs = [p12file.certificate] + p12file.chain
+    serialized_key = key.private_bytes(
+        Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+    )
+    serialized_certs = [cert.certificate.public_bytes(Encoding.DER) for cert in certs]
+    pke = jks.PrivateKeyEntry.new(alias, serialized_certs, serialized_key)
+    keystore = jks.KeyStore.new("jks", [pke])
+    keystore.save(output, password)
