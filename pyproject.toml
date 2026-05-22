@@ -1,23 +1,25 @@
-[tool.poetry]
+[project]
 name = "certman"
 version = "0.2.1"
 description = "Manage keys and certificates using p12 files"
-authors = ["Sernin van de Krol <serninpc@paneidos.net>"]
+authors = [{ name = "Sernin van de Krol", email = "serninpc@paneidos.net" }]
+requires-python = ">=3.12"
 readme = "README.md"
+dependencies = [
+    "typer>=0.25.1",
+    "cryptography>=48.0.0",
+    "typing-extensions>=4.15.0",
+]
 
-[tool.poetry.scripts]
+[project.scripts]
 certman = "certman.main:app"
 
-[tool.poetry.dependencies]
-python = "^3.12"
-typer = "^0.25.1"
-cryptography = "^48.0.0"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.4"
-black = "^23.12.1"
+[dependency-groups]
+dev = [
+    "pytest>=7.4.4",
+    "black>=23.12.1",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
