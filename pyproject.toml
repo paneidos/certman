@@ -1,6 +1,6 @@
 [project]
 name = "certman"
-version = "0.2.1"
+version = "0.2.2"
 description = "Manage keys and certificates using p12 files"
 authors = [{ name = "Sernin van de Krol", email = "serninpc@paneidos.net" }]
 requires-python = ">=3.12"
