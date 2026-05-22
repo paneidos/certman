@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "certman"
-version = "0.2.0"
+version = "0.2.1"
 description = "Manage keys and certificates using p12 files"
 authors = ["Sernin van de Krol <serninpc@paneidos.net>"]
 readme = "README.md"
