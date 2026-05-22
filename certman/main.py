@@ -2,10 +2,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, NamedTuple
 
-from cryptography.hazmat._oid import ExtendedKeyUsageOID
-from cryptography.hazmat.primitives._serialization import PrivateFormat, NoEncryption
 from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
 from cryptography.x509 import (
     CertificateBuilder,
     NameAttribute,
@@ -20,9 +18,9 @@ from cryptography.x509 import (
     DNSName,
     CRLDistributionPoints,
     DistributionPoint,
-    UniformResourceIdentifier,
+    UniformResourceIdentifier, ExtensionType,
 )
-from cryptography.x509.oid import NameOID, ObjectIdentifier
+from cryptography.x509.oid import NameOID, ObjectIdentifier, ExtendedKeyUsageOID
 from rich.console import Console
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 import typer
@@ -267,7 +265,7 @@ def sign(
         .not_valid_before(datetime.utcnow())
         .not_valid_after(datetime.utcnow() + timedelta(days=expires))
     )
-    extensions = [
+    extensions: list[ExtensionType] = [
         ExtendedKeyUsage(
             [ExtendedKeyUsageOID.CLIENT_AUTH, ExtendedKeyUsageOID.SERVER_AUTH]
         ),
